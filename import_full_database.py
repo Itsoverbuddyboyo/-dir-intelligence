@@ -31,13 +31,13 @@ EXPORT_URL = (
 
 DATABASE_DIR = Path("database")
 
-DOWNLOAD_ATTEMPTS = 8
-CHUNK_SIZE = 256 * 1024
-PROGRESS_INTERVAL = 8 * 1024 * 1024
-RETRY_BASE_DELAY = 10
-MAX_RETRY_DELAY = 90
+RANGE_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
+CHUNK_RETRIES = 8
+CHUNK_READ_SIZE = 256 * 1024
+RETRY_BASE_DELAY = 3
+MAX_RETRY_DELAY = 20
 MAX_INVALID_RATIO = 0.01
-DOWNLOAD_TIMEOUT = 120
+DOWNLOAD_TIMEOUT = 90
 
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 CONTENT_RANGE_PATTERN = re.compile(
@@ -96,358 +96,243 @@ def download_export(destination: Path) -> None:
             "Check your GitHub repository secret."
         )
 
-    destination.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
 
+    offset = 0
+    total_bytes = None
     validator = None
-    last_error = None
-    last_progress = 0
 
-    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+    print()
+    print("Starting chunk-based MalwareBazaar download...")
+    print(f"Chunk size: {RANGE_CHUNK_SIZE // (1024 * 1024)} MiB")
 
-        # Recover immediately if the previous attempt actually
-        # completed the archive before encountering an error.
+    with destination.open("wb") as output:
 
-        if verify_zip(destination):
-            print("Existing partial download is a valid ZIP.")
-            print("ZIP download verified.")
-            return
+        while total_bytes is None or offset < total_bytes:
 
-        offset = (
-            destination.stat().st_size
-            if destination.exists()
-            else 0
-        )
+            requested_end = offset + RANGE_CHUNK_SIZE - 1
+            chunk_data = None
+            last_error = None
 
-        headers = {
-            "User-Agent": "DIR-Intelligence-Importer/2.0",
-            "Accept": "application/zip, application/octet-stream, */*",
-            "Accept-Encoding": "identity",
-        }
+            for attempt in range(1, CHUNK_RETRIES + 1):
 
-        if offset > 0:
-            headers["Range"] = f"bytes={offset}-"
+                headers = {
+                    "User-Agent": "DIR-Intelligence-Importer/3.0",
+                    "Accept": "application/zip, application/octet-stream, */*",
+                    "Accept-Encoding": "identity",
+                    "Range": f"bytes={offset}-{requested_end}",
+                }
 
-            if validator:
-                headers["If-Range"] = validator
+                if validator:
+                    headers["If-Range"] = validator
 
-        request = urllib.request.Request(
-            EXPORT_URL,
-            headers=headers,
-            method="GET",
-        )
-
-        print()
-        print(
-            f"Download attempt {attempt}/{DOWNLOAD_ATTEMPTS}"
-        )
-
-        if offset:
-            print(
-                f"Resuming from {offset:,} bytes..."
-            )
-        else:
-            print("Starting download...")
-
-        response = None
-
-        try:
-
-            response = urllib.request.urlopen(
-                request,
-                timeout=DOWNLOAD_TIMEOUT,
-            )
-
-            status = response.status
-
-            # ------------------------------------------------
-            # HANDLE SERVER RESPONSE
-            # ------------------------------------------------
-
-            if status == 206:
-
-                content_range = response.headers.get(
-                    "Content-Range", ""
+                request = urllib.request.Request(
+                    EXPORT_URL,
+                    headers=headers,
+                    method="GET",
                 )
 
-                match = CONTENT_RANGE_PATTERN.fullmatch(
-                    content_range.strip()
-                )
+                response = None
 
-                if not match:
-                    raise RuntimeError(
-                        "Server returned an invalid Content-Range."
+                try:
+                    print(
+                        f"\nRequesting bytes {offset:,}-{requested_end:,} "
+                        f"(attempt {attempt}/{CHUNK_RETRIES})..."
                     )
 
-                range_start = int(match.group(1))
-                range_end = int(match.group(2))
-
-                total_bytes = (
-                    int(match.group(3))
-                    if match.group(3) != "*"
-                    else None
-                )
-
-                if range_start != offset:
-                    raise RuntimeError(
-                        "Server resumed from an unexpected byte "
-                        f"position: {range_start:,}, expected "
-                        f"{offset:,}."
+                    response = urllib.request.urlopen(
+                        request,
+                        timeout=DOWNLOAD_TIMEOUT,
                     )
 
-                if range_end < range_start:
-                    raise RuntimeError(
-                        "Invalid Content-Range boundaries."
-                    )
-
-                if total_bytes is not None:
-                    if range_end >= total_bytes:
+                    if response.status != 206:
                         raise RuntimeError(
-                            "Invalid Content-Range total size."
+                            f"Expected HTTP 206, received HTTP {response.status}. "
+                            "The server did not honor the Range request."
                         )
 
-                mode = "ab"
+                    content_range = response.headers.get("Content-Range", "")
+                    match = CONTENT_RANGE_PATTERN.fullmatch(content_range.strip())
 
-                print(
-                    "Server supports resumable downloads."
-                )
+                    if not match:
+                        raise RuntimeError(
+                            f"Invalid Content-Range: {content_range!r}"
+                        )
 
-            elif status == 200:
-
-                # Server ignored Range or does not support it.
-                # Restart safely instead of appending a full ZIP
-                # to an existing partial ZIP.
-
-                if offset:
-                    print(
-                        "Server does not honor Range requests. "
-                        "Restarting download from zero."
+                    range_start = int(match.group(1))
+                    range_end = int(match.group(2))
+                    response_total = (
+                        int(match.group(3))
+                        if match.group(3) != "*"
+                        else None
                     )
 
-                offset = 0
-                mode = "wb"
+                    if response_total is None:
+                        raise RuntimeError(
+                            "Server did not provide the total archive size."
+                        )
 
-                content_length = response.headers.get(
-                    "Content-Length"
-                )
+                    if range_start != offset:
+                        raise RuntimeError(
+                            f"Wrong range start: {range_start:,}; expected {offset:,}."
+                        )
 
-                total_bytes = (
-                    int(content_length)
-                    if content_length
-                    else None
-                )
+                    if response_total <= offset:
+                        raise RuntimeError("Invalid total archive size.")
 
-            else:
-                raise RuntimeError(
-                    f"Unexpected HTTP status: {status}"
-                )
+                    expected_end = min(requested_end, response_total - 1)
 
-            # ------------------------------------------------
-            # REMEMBER DOWNLOAD VALIDATOR
-            # ------------------------------------------------
+                    if range_end != expected_end:
+                        raise RuntimeError(
+                            f"Wrong range end: {range_end:,}; expected {expected_end:,}."
+                        )
 
-            etag = response.headers.get("ETag")
-            last_modified = response.headers.get(
-                "Last-Modified"
-            )
+                    if total_bytes is None:
+                        total_bytes = response_total
+                        print(
+                            f"Archive size: {total_bytes:,} bytes "
+                            f"({total_bytes / (1024 * 1024):.2f} MiB)"
+                        )
 
-            if etag:
-                validator = etag
-            elif last_modified:
-                validator = last_modified
+                    elif response_total != total_bytes:
+                        raise RuntimeError(
+                            "Archive size changed between requests."
+                        )
 
-            # ------------------------------------------------
-            # DOWNLOAD STREAM
-            # ------------------------------------------------
+                    response_validator = (
+                        response.headers.get("ETag")
+                        or response.headers.get("Last-Modified")
+                    )
 
-            downloaded = offset
-            last_progress = downloaded
+                    if validator and response_validator:
+                        if response_validator != validator:
+                            raise RuntimeError(
+                                "Archive validator changed between chunks."
+                            )
 
-            expected_remaining = (
-                total_bytes - offset
-                if total_bytes is not None
-                else None
-            )
+                    elif response_validator:
+                        validator = response_validator
 
-            with destination.open(mode) as output:
+                    expected_length = range_end - range_start + 1
+                    content_length = response.headers.get("Content-Length")
 
-                while True:
+                    if content_length is not None:
+                        if int(content_length) != expected_length:
+                            raise ConnectionError(
+                                f"Incorrect Content-Length: {content_length}, "
+                                f"expected {expected_length}."
+                            )
 
-                    try:
-                        chunk = response.read(CHUNK_SIZE)
+                    data = bytearray()
 
-                    except http.client.IncompleteRead as error:
+                    while len(data) < expected_length:
 
-                        # Crucial: preserve bytes already received
-                        # by urllib before attempting another request.
+                        remaining = expected_length - len(data)
 
-                        partial = error.partial
+                        try:
+                            part = response.read(
+                                min(CHUNK_READ_SIZE, remaining)
+                            )
 
-                        if partial:
-                            output.write(partial)
-                            downloaded += len(partial)
+                        except http.client.IncompleteRead as error:
 
-                        output.flush()
+                            if error.partial:
+                                data.extend(error.partial)
 
-                        raise ConnectionError(
-                            "Incomplete HTTP response. "
-                            f"Preserved {len(partial):,} additional "
-                            "bytes for resumption."
+                            raise ConnectionError(
+                                "Incomplete chunk response: "
+                                f"{len(data):,}/{expected_length:,} bytes."
+                            ) from error
+
+                        if not part:
+                            raise ConnectionError(
+                                "Connection ended prematurely: "
+                                f"{len(data):,}/{expected_length:,} bytes."
+                            )
+
+                        data.extend(part)
+
+                    if len(data) != expected_length:
+                        raise ConnectionError("Chunk size mismatch.")
+
+                    chunk_data = data
+                    break
+
+                except urllib.error.HTTPError as error:
+
+                    if error.code in (400, 401, 403, 404):
+                        raise RuntimeError(
+                            f"MalwareBazaar rejected the request: HTTP {error.code}."
                         ) from error
 
-                    if not chunk:
-                        break
+                    last_error = f"HTTP {error.code}: {error.reason}"
 
-                    output.write(chunk)
-                    downloaded += len(chunk)
+                except (
+                    urllib.error.URLError,
+                    TimeoutError,
+                    ConnectionError,
+                    http.client.HTTPException,
+                    OSError,
+                    RuntimeError,
+                    ValueError,
+                ) as error:
 
-                    if (
-                        downloaded - last_progress
-                        >= PROGRESS_INTERVAL
-                    ):
-
-                        if total_bytes:
-                            percentage = (
-                                downloaded / total_bytes
-                            ) * 100
-
-                            print(
-                                f"Download progress: "
-                                f"{downloaded:,} / "
-                                f"{total_bytes:,} bytes "
-                                f"({percentage:.1f}%)"
-                            )
-
-                        else:
-                            print(
-                                f"Downloaded: {downloaded:,} bytes"
-                            )
-
-                        last_progress = downloaded
-
-                output.flush()
-                os.fsync(output.fileno())
-
-            # ------------------------------------------------
-            # CHECK DOWNLOAD LENGTH
-            # ------------------------------------------------
-
-            if total_bytes is not None:
-
-                actual_size = destination.stat().st_size
-
-                if actual_size != total_bytes:
-
-                    raise ConnectionError(
-                        "Download size mismatch: "
-                        f"received {actual_size:,} bytes, "
-                        f"expected {total_bytes:,} bytes."
+                    last_error = (
+                        f"{type(error).__name__}: {str(error)[:250]}"
                     )
 
-            print()
-            print(
-                f"Download finished: "
-                f"{destination.stat().st_size:,} bytes."
-            )
+                finally:
 
-            # ------------------------------------------------
-            # VERIFY ZIP
-            # ------------------------------------------------
+                    if response is not None:
+                        response.close()
 
-            if not verify_zip(destination):
+                print(f"Chunk failed: {last_error}")
 
+                if attempt < CHUNK_RETRIES:
+
+                    delay = min(
+                        RETRY_BASE_DELAY * attempt,
+                        MAX_RETRY_DELAY,
+                    )
+
+                    print(f"Retrying this chunk in {delay} seconds...")
+                    time.sleep(delay)
+
+            if chunk_data is None:
                 raise RuntimeError(
-                    "Downloaded file failed ZIP validation."
+                    f"Failed to download chunk at byte {offset:,} "
+                    f"after {CHUNK_RETRIES} attempts. Last error: {last_error}"
                 )
 
-            print("ZIP integrity verified.")
-            print("Download successful.")
+            output.write(chunk_data)
+            output.flush()
+            os.fsync(output.fileno())
 
-            return
+            offset += len(chunk_data)
+            percentage = offset / total_bytes * 100
 
-        except urllib.error.HTTPError as error:
-
-            last_error = (
-                f"HTTP {error.code}: {error.reason}"
+            print(
+                f"Download progress: {offset:,} / "
+                f"{total_bytes:,} bytes ({percentage:.1f}%)"
             )
 
-            # 416 can mean that the saved file already contains
-            # the entire resource. Verify before discarding it.
+    actual_size = destination.stat().st_size
 
-            if error.code == 416 and verify_zip(destination):
-
-                print(
-                    "Server reports requested range unavailable, "
-                    "but the existing archive is valid."
-                )
-
-                return
-
-            # If the server refuses Range, discard the partial
-            # file and allow the next attempt to start fresh.
-
-            if error.code == 416:
-                destination.unlink(missing_ok=True)
-                validator = None
-
-            print(f"Download failed: {last_error}")
-
-        except (
-            urllib.error.URLError,
-            TimeoutError,
-            ConnectionError,
-            http.client.HTTPException,
-            OSError,
-            zipfile.BadZipFile,
-            RuntimeError,
-        ) as error:
-
-            last_error = (
-                f"{type(error).__name__}: {str(error)[:250]}"
-            )
-
-            print(f"Download failed: {last_error}")
-
-        finally:
-
-            if response is not None:
-                response.close()
-
-        if attempt == DOWNLOAD_ATTEMPTS:
-            break
-
-        # Keep the partial archive. The next request will attempt
-        # to resume it using HTTP Range.
-
-        remaining = (
-            destination.stat().st_size
-            if destination.exists()
-            else 0
+    if actual_size != total_bytes:
+        raise RuntimeError(
+            f"Final download size mismatch: {actual_size:,} != {total_bytes:,}."
         )
 
-        print(
-            f"Preserved {remaining:,} bytes."
+    print()
+    print(f"Download finished: {actual_size:,} bytes.")
+
+    if not verify_zip(destination):
+        raise RuntimeError(
+            "Downloaded archive failed ZIP integrity verification."
         )
 
-        delay = min(
-            RETRY_BASE_DELAY * attempt,
-            MAX_RETRY_DELAY
-        )
-
-        print(
-            f"Retrying in {delay} seconds..."
-        )
-
-        time.sleep(delay)
-
-    raise RuntimeError(
-        "Could not download a complete, valid export after "
-        f"{DOWNLOAD_ATTEMPTS} attempts. "
-        f"Last error: {last_error}. "
-        "Check MalwareBazaar access and Range support."
-    )
+    print("ZIP integrity verified.")
+    print("Download successful.")
 
 
 # ============================================================
