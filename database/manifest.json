@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "source": "MalwareBazaar",
+  "updated": "2026-11-08T17:04:36.790688+00:00",
+  "hash_type": "SHA-256",
+  "hash_count": 1168731,
+  "rows_processed": 1168731,
+  "invalid_rows": 0,
+  "shards": {
+    "0.txt": {
+      "count": 73893,
+      "size": 4803045,
+      "sha256": "f24024ffef63a5bf321a60bb0ff0aa274be285fd5ea1b605b6ee17e9ea05db55"
+    },
+    "1.txt": {
+      "count": 73373,
+      "size": 4769245,
+      "sha256": "ade2d03a6a98fd5c0a7e6561319b374d406296088d117dc0ac5095727e630f2b"
+    },
+    "2.txt": {
+      "count": 73194,
+      "size": 4757610,
+      "sha256": "27a2d10855158ab2319f20175ef19ce4d2ca26c356b39dc6718a8a0588ac14d6"
+    },
+    "3.txt": {
+      "count": 73367,
+      "size": 4768855,
+      "sha256": "4fe12a193884ef504b23202a869d5ad9f77bb83ca62d8ba62df2533cfc937474"
+    },
+    "4.txt": {
+      "count": 73180,
+      "size": 4756700,
+      "sha256": "aa326c36e0e17b9abe4a4fb85e37343736f086ca35aaf78909083c262ad96eba"
+    },
+    "5.txt": {
+      "count": 72922,
+      "size": 4739930,
+      "sha256": "71d3c24fb663ffb95d7db4f45c6fee744bb149cc47e39ef8d3c858f2095ee7a1"
+    },
+    "6.txt": {
+      "count": 72625,
+      "size": 4720625,
+      "sha256": "3979ab67e36e764e736d420852ccd984abdaa86292ed9aae69c5cf7ce89fee54"
+    },
+    "7.txt": {
+      "count": 72987,
+      "size": 4744155,
+      "sha256": "4515e9397701d71a9de855265858020cd0722bacb6b0024a9de8d009d798c477"
+    },
+    "8.txt": {
+      "count": 72971,
+      "size": 4743115,
+      "sha256": "926f89cecd42d0c04848ebecdb7c5dce5b842a35ac5a39becd4702867c72e429"
+    },
+    "9.txt": {
+      "count": 72759,
+      "size": 4729335,
+      "sha256": "6acec1857b625194fc39f0b302c9d7cc1051c193a4ad4a9a3c06e6cc9e6725d4"
+    },
+    "a.txt": {
+      "count": 72791,
+      "size": 4731415,
+      "sha256": "3997302904c1314cf06ff2458f1878e9a52088e1771ad801cd8f748fe26d7eea"
+    },
+    "b.txt": {
+      "count": 72909,
+      "size": 4739085,
+      "sha256": "6ecefe0dd3a69ee0a63283eef3f3fe383605174555f2e39d7c62bbcb867f6fa0"
+    },
+    "c.txt": {
+      "count": 72848,
+      "size": 4735120,
+      "sha256": "c4120d18ad70f7bccb64130847ab702a1f4c71210596587ede9a120cf9ddeab6"
+    },
+    "d.txt": {
+      "count": 72548,
+      "size": 4715620,
+      "sha256": "c7a25fada4415574ff1caf14ce53757758a7480cb296e0074a64a7733b860f0c"
+    },
+    "e.txt": {
+      "count": 73182,
+      "size": 4756830,
+      "sha256": "09accb452cdfc47a80d70ee0c9e257c0b21f75f61b30c1c3ff0f6ed536ff65c1"
+    },
+    "f.txt": {
+      "count": 73182,
+      "size": 4756830,
+      "sha256": "0af22e52960a5264bc4a41e25f51891078140219d29cdcf522e3320e104e1242"
+    }
+  }
+}
