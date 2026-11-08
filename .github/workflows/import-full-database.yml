@@ -1,0 +1,80 @@
+
+name: Import Full MalwareBazaar Database
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dir-full-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Import full MalwareBazaar database
+        env:
+          MB_AUTH_KEY: ${{ secrets.MB_AUTH_KEY }}
+        run: python import_full_database.py
+
+      - name: Verify database
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("database")
+          manifest = json.loads(
+              (root / "manifest.json").read_text()
+          )
+
+          assert len(manifest["shards"]) == 16
+
+          total = 0
+
+          for name, info in manifest["shards"].items():
+              path = root / name
+
+              assert path.exists(), f"Missing {name}"
+              assert path.stat().st_size == info["size"]
+              assert path.stat().st_size < 100 * 1024 * 1024
+
+              total += path.stat().st_size
+
+          assert total < 900 * 1024 * 1024
+
+          assert sum(
+              item["count"]
+              for item in manifest["shards"].values()
+          ) == manifest["hash_count"]
+
+          print("DATABASE VERIFIED")
+          print("Total hashes:", manifest["hash_count"])
+          print("Total shard size:", total, "bytes")
+          PY
+
+      - name: Publish database
+        run: |
+          git config user.name "DIR Intelligence Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add database/
+
+          if git diff --cached --quiet; then
+            echo "No database changes."
+          else
+            git commit -m "Import full MalwareBazaar intelligence database"
+            git push
+          fi
