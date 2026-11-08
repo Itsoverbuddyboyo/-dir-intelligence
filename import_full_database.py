@@ -31,7 +31,7 @@ EXPORT_URL = (
 
 DATABASE_DIR = Path("database")
 
-RANGE_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
+RANGE_CHUNK_SIZE = 4 * 1024 * 1024
 CHUNK_RETRIES = 8
 CHUNK_READ_SIZE = 256 * 1024
 
@@ -64,15 +64,13 @@ def verify_zip(path: Path) -> bool:
         return False
 
     try:
-
         if not zipfile.is_zipfile(path):
             return False
 
         with zipfile.ZipFile(path, "r") as archive:
 
             csv_files = [
-                name
-                for name in archive.namelist()
+                name for name in archive.namelist()
                 if name.lower().endswith(".csv")
             ]
 
@@ -84,11 +82,7 @@ def verify_zip(path: Path) -> bool:
 
         return True
 
-    except (
-        OSError,
-        zipfile.BadZipFile,
-        EOFError
-    ):
+    except (OSError, zipfile.BadZipFile, EOFError):
         return False
 
 
@@ -100,14 +94,10 @@ def download_export(destination: Path) -> None:
 
     if not API_KEY:
         raise RuntimeError(
-            "MB_AUTH_KEY is missing. "
-            "Check your GitHub repository secret."
+            "MB_AUTH_KEY is missing. Check your GitHub secret."
         )
 
-    destination.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
 
     offset = 0
     total_bytes = None
@@ -115,33 +105,22 @@ def download_export(destination: Path) -> None:
 
     print()
     print("Starting chunk-based MalwareBazaar download...")
-    print(
-        f"Chunk size: "
-        f"{RANGE_CHUNK_SIZE // (1024 * 1024)} MiB"
-    )
+    print(f"Chunk size: {RANGE_CHUNK_SIZE // (1024 * 1024)} MiB")
 
     with destination.open("wb") as output:
 
         while total_bytes is None or offset < total_bytes:
 
-            requested_end = (
-                offset + RANGE_CHUNK_SIZE - 1
-            )
+            requested_end = offset + RANGE_CHUNK_SIZE - 1
 
             chunk_data = None
             last_error = None
 
-            for attempt in range(
-                1,
-                CHUNK_RETRIES + 1
-            ):
+            for attempt in range(1, CHUNK_RETRIES + 1):
 
                 headers = {
-                    "User-Agent": "DIR-Intelligence-Importer/3.0",
-                    "Accept": (
-                        "application/zip, "
-                        "application/octet-stream, */*"
-                    ),
+                    "User-Agent": "DIR-Intelligence-Importer/4.0",
+                    "Accept": "application/zip, application/octet-stream, */*",
                     "Accept-Encoding": "identity",
                     "Range": f"bytes={offset}-{requested_end}",
                 }
@@ -158,7 +137,6 @@ def download_export(destination: Path) -> None:
                 response = None
 
                 try:
-
                     print(
                         f"\nRequesting bytes "
                         f"{offset:,}-{requested_end:,} "
@@ -172,14 +150,11 @@ def download_export(destination: Path) -> None:
 
                     if response.status != 206:
                         raise RuntimeError(
-                            f"Expected HTTP 206, received "
-                            f"HTTP {response.status}. "
-                            "The server did not honor the Range request."
+                            f"Expected HTTP 206, got {response.status}."
                         )
 
                     content_range = response.headers.get(
-                        "Content-Range",
-                        ""
+                        "Content-Range", ""
                     )
 
                     match = CONTENT_RANGE_PATTERN.fullmatch(
@@ -188,13 +163,11 @@ def download_export(destination: Path) -> None:
 
                     if not match:
                         raise RuntimeError(
-                            f"Invalid Content-Range: "
-                            f"{content_range!r}"
+                            f"Invalid Content-Range: {content_range!r}"
                         )
 
                     range_start = int(match.group(1))
                     range_end = int(match.group(2))
-
                     response_total = (
                         int(match.group(3))
                         if match.group(3) != "*"
@@ -203,20 +176,11 @@ def download_export(destination: Path) -> None:
 
                     if response_total is None:
                         raise RuntimeError(
-                            "Server did not provide "
-                            "the total archive size."
+                            "Server did not provide total archive size."
                         )
 
                     if range_start != offset:
-                        raise RuntimeError(
-                            f"Wrong range start: {range_start:,}; "
-                            f"expected {offset:,}."
-                        )
-
-                    if response_total <= offset:
-                        raise RuntimeError(
-                            "Invalid total archive size."
-                        )
+                        raise RuntimeError("Incorrect range start.")
 
                     expected_end = min(
                         requested_end,
@@ -224,13 +188,9 @@ def download_export(destination: Path) -> None:
                     )
 
                     if range_end != expected_end:
-                        raise RuntimeError(
-                            f"Wrong range end: {range_end:,}; "
-                            f"expected {expected_end:,}."
-                        )
+                        raise RuntimeError("Incorrect range end.")
 
                     if total_bytes is None:
-
                         total_bytes = response_total
 
                         print(
@@ -249,94 +209,66 @@ def download_export(destination: Path) -> None:
                     )
 
                     if validator and response_validator:
-
                         if response_validator != validator:
                             raise RuntimeError(
-                                "Archive validator changed "
-                                "between chunks."
+                                "Archive validator changed between chunks."
                             )
-
                     elif response_validator:
                         validator = response_validator
 
-                    expected_length = (
-                        range_end - range_start + 1
-                    )
+                    expected_length = range_end - range_start + 1
 
                     content_length = response.headers.get(
                         "Content-Length"
                     )
 
                     if content_length is not None:
-
                         if int(content_length) != expected_length:
                             raise ConnectionError(
-                                "Incorrect Content-Length: "
-                                f"{content_length}, expected "
-                                f"{expected_length}."
+                                "Incorrect Content-Length."
                             )
 
                     data = bytearray()
 
                     while len(data) < expected_length:
 
-                        remaining = (
-                            expected_length - len(data)
-                        )
+                        remaining = expected_length - len(data)
 
                         try:
-
                             part = response.read(
-                                min(
-                                    CHUNK_READ_SIZE,
-                                    remaining
-                                )
+                                min(CHUNK_READ_SIZE, remaining)
                             )
-
                         except http.client.IncompleteRead as error:
 
                             if error.partial:
                                 data.extend(error.partial)
 
                             raise ConnectionError(
-                                "Incomplete chunk response: "
-                                f"{len(data):,}/"
-                                f"{expected_length:,} bytes."
+                                "Incomplete chunk response."
                             ) from error
 
                         if not part:
                             raise ConnectionError(
-                                "Connection ended prematurely: "
-                                f"{len(data):,}/"
-                                f"{expected_length:,} bytes."
+                                "Connection ended prematurely."
                             )
 
                         data.extend(part)
 
                     if len(data) != expected_length:
-                        raise ConnectionError(
-                            "Chunk size mismatch."
-                        )
+                        raise ConnectionError("Chunk size mismatch.")
 
                     chunk_data = data
                     break
 
                 except urllib.error.HTTPError as error:
 
-                    if error.code in (
-                        400,
-                        401,
-                        403,
-                        404
-                    ):
+                    if error.code in (400, 401, 403, 404):
                         raise RuntimeError(
-                            f"MalwareBazaar rejected the request: "
+                            f"MalwareBazaar rejected request: "
                             f"HTTP {error.code}."
                         ) from error
 
-                    last_error = (
-                        f"HTTP {error.code}: {error.reason}"
-                    )
+                    last_error = f"HTTP {error.code}: {error.reason}"
 
                 except (
                     urllib.error.URLError,
@@ -349,48 +281,37 @@ def download_export(destination: Path) -> None:
                 ) as error:
 
                     last_error = (
-                        f"{type(error).__name__}: "
-                        f"{str(error)[:250]}"
+                        f"{type(error).__name__}: {str(error)[:250]}"
                     )
 
                 finally:
-
                     if response is not None:
                         response.close()
 
                 print(f"Chunk failed: {last_error}")
 
                 if attempt < CHUNK_RETRIES:
-
                     delay = min(
                         RETRY_BASE_DELAY * attempt,
                         MAX_RETRY_DELAY
                     )
 
-                    print(
-                        f"Retrying this chunk in "
-                        f"{delay} seconds..."
-                    )
-
+                    print(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
 
             if chunk_data is None:
                 raise RuntimeError(
-                    f"Failed to download chunk at byte "
-                    f"{offset:,} after {CHUNK_RETRIES} attempts. "
-                    f"Last error: {last_error}"
+                    f"Failed at byte {offset:,} after "
+                    f"{CHUNK_RETRIES} attempts. {last_error}"
                 )
 
             output.write(chunk_data)
             output.flush()
-
             os.fsync(output.fileno())
 
             offset += len(chunk_data)
 
-            percentage = (
-                offset / total_bytes * 100
-            )
+            percentage = offset / total_bytes * 100
 
             print(
                 f"Download progress: {offset:,} / "
@@ -400,15 +321,10 @@ def download_export(destination: Path) -> None:
     actual_size = destination.stat().st_size
 
     if actual_size != total_bytes:
-        raise RuntimeError(
-            f"Final download size mismatch: "
-            f"{actual_size:,} != {total_bytes:,}."
-        )
+        raise RuntimeError("Final download size mismatch.")
 
     print()
-    print(
-        f"Download finished: {actual_size:,} bytes."
-    )
+    print(f"Download finished: {actual_size:,} bytes.")
 
     if not verify_zip(destination):
         raise RuntimeError(
@@ -417,6 +333,19 @@ def download_export(destination: Path) -> None:
 
     print("ZIP integrity verified.")
     print("Download successful.")
+
+
+# ============================================================
+# CSV HEADER DETECTION
+# ============================================================
+
+def normalize_header(value):
+
+    value = value.strip().lstrip("\ufeff").strip()
+    value = value.lstrip("#").strip()
+    value = value.strip('"').strip("'").strip()
+
+    return value.lower()
 
 
 # ============================================================
@@ -432,35 +361,29 @@ def extract_hashes(archive_path: Path):
 
     invalid_rows = 0
     total_rows = 0
+    empty_hash_rows = 0
+    short_rows = 0
 
     print()
     print("Extracting SHA-256 hashes...")
 
-    with zipfile.ZipFile(
-        archive_path,
-        "r"
-    ) as archive:
+    with zipfile.ZipFile(archive_path, "r") as archive:
 
         csv_files = [
-            name
-            for name in archive.namelist()
+            name for name in archive.namelist()
             if name.lower().endswith(".csv")
         ]
 
         if len(csv_files) != 1:
             raise RuntimeError(
-                "Expected exactly one CSV file in the export ZIP, "
-                f"but found {len(csv_files)}."
+                f"Expected one CSV file, found {len(csv_files)}."
             )
 
         csv_name = csv_files[0]
 
         print(f"Reading {csv_name}...")
 
-        with archive.open(
-            csv_name,
-            "r"
-        ) as raw_file:
+        with archive.open(csv_name, "r") as raw_file:
 
             text_file = io.TextIOWrapper(
                 raw_file,
@@ -469,102 +392,119 @@ def extract_hashes(archive_path: Path):
                 newline="",
             )
 
-            csv_reader = csv.reader(text_file)
-
-            # ------------------------------------------------
-            # FIND THE REAL HEADER
-            # MalwareBazaar exports can contain a banner
-            # before the actual CSV header.
-            # ------------------------------------------------
+            # Use ONE reader for the entire file.
+            # Do not switch to DictReader midway.
+            reader = csv.reader(text_file)
 
             header = None
-            hash_column = None
+            hash_index = None
 
-            for row in csv_reader:
+            # Find the real header after the banner.
+            for row in reader:
 
                 cleaned = [
                     value.strip().lstrip("#").strip()
                     for value in row
                 ]
 
-                normalized = {
-                    value.lower(): value
+                normalized = [
+                    normalize_header(value)
                     for value in cleaned
-                    if value
-                }
+                ]
 
-                candidate = (
-                    normalized.get("sha256_hash")
-                    or normalized.get("sha256")
+                candidates = (
+                    "sha256_hash",
+                    "sha256",
                 )
 
-                if candidate:
+                for candidate in candidates:
 
-                    header = cleaned
-                    hash_column = candidate
+                    if candidate in normalized:
 
+                        hash_index = normalized.index(candidate)
+                        header = cleaned
+                        break
+
+                if header is not None:
                     break
 
             if header is None:
                 raise RuntimeError(
-                    "Could not find the SHA-256 header "
-                    "after scanning the CSV preamble."
+                    "Could not locate the SHA-256 column."
                 )
 
-            print(
-                "Found CSV header successfully."
-            )
+            print("Found CSV header successfully.")
+            print(f"SHA-256 column: {header[hash_index]}")
+            print(f"Columns found: {len(header)}")
+            print(f"SHA-256 column index: {hash_index}")
 
-            print(
-                f"SHA-256 column: {hash_column}"
-            )
+            # ------------------------------------------------
+            # READ DATA ROWS BY COLUMN INDEX
+            # ------------------------------------------------
 
-            print(
-                f"Columns found: {len(header)}"
-            )
-
-            # Continue reading immediately after the header.
-            reader = csv.DictReader(
-                text_file,
-                fieldnames=header,
-            )
+            diagnostic_samples = []
 
             for row in reader:
 
-                value = (
-                    row.get(hash_column) or ""
-                ).strip()
+                if not row:
+                    continue
+
+                if hash_index >= len(row):
+                    short_rows += 1
+                    continue
+
+                value = row[hash_index].strip()
 
                 if not value:
+                    empty_hash_rows += 1
                     continue
 
                 total_rows += 1
 
-                if not SHA256_PATTERN.fullmatch(value):
+                # Preserve a few samples for diagnostics.
+                if len(diagnostic_samples) < 5:
+                    diagnostic_samples.append({
+                        "row_length": len(row),
+                        "hash_value": value[:100],
+                        "hash_length": len(value),
+                    })
 
+                if not SHA256_PATTERN.fullmatch(value):
                     invalid_rows += 1
                     continue
 
                 value = value.lower()
 
                 shard_name = value[0] + ".txt"
-
                 shards[shard_name].add(value)
 
                 if total_rows % 250000 == 0:
-
-                    print(
-                        f"Processed {total_rows:,} rows..."
-                    )
+                    print(f"Processed {total_rows:,} rows...")
 
     unique_count = sum(
         len(values)
         for values in shards.values()
     )
 
+    print()
+    print("CSV parsing diagnostics:")
+    print(f"Rows containing a nonempty hash field: {total_rows:,}")
+    print(f"Empty hash fields: {empty_hash_rows:,}")
+    print(f"Rows shorter than expected: {short_rows:,}")
+    print(f"Invalid hash values: {invalid_rows:,}")
+
     if unique_count == 0:
+
+        print()
+        print("No valid hashes were extracted.")
+        print("Sample values found in the SHA-256 column:")
+
+        for sample in diagnostic_samples:
+            print(json.dumps(sample, ensure_ascii=False))
+
         raise RuntimeError(
-            "No valid SHA-256 hashes were found."
+            "No valid SHA-256 hashes were found. "
+            "See CSV parsing diagnostics above."
         )
 
     invalid_ratio = (
@@ -580,17 +520,9 @@ def extract_hashes(archive_path: Path):
         )
 
     print()
-    print(
-        f"Rows processed: {total_rows:,}"
-    )
-
-    print(
-        f"Invalid rows: {invalid_rows:,}"
-    )
-
-    print(
-        f"Unique SHA-256 hashes: {unique_count:,}"
-    )
+    print(f"Rows processed: {total_rows:,}")
+    print(f"Invalid rows: {invalid_rows:,}")
+    print(f"Unique SHA-256 hashes: {unique_count:,}")
 
     return (
         shards,
@@ -612,10 +544,7 @@ def build_database(
     output_dir: Path,
 ):
 
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     shard_metadata = {}
 
@@ -624,13 +553,9 @@ def build_database(
 
     for shard_name in SHARD_NAMES:
 
-        hashes = sorted(
-            shards[shard_name]
-        )
+        hashes = sorted(shards[shard_name])
 
-        shard_path = (
-            output_dir / shard_name
-        )
+        shard_path = output_dir / shard_name
 
         content = (
             "\n".join(hashes) + "\n"
@@ -639,44 +564,31 @@ def build_database(
         )
 
         encoded = content.encode("ascii")
-
         shard_path.write_bytes(encoded)
 
         shard_metadata[shard_name] = {
             "count": len(hashes),
             "size": len(encoded),
-            "sha256": hashlib.sha256(
-                encoded
-            ).hexdigest(),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
         }
 
         print(
-            f"{shard_name}: "
-            f"{len(hashes):,} hashes, "
+            f"{shard_name}: {len(hashes):,} hashes, "
             f"{len(encoded):,} bytes"
         )
 
     manifest = {
         "version": 1,
         "source": "MalwareBazaar",
-        "updated": datetime.now(
-            timezone.utc
-        ).isoformat(),
+        "updated": datetime.now(timezone.utc).isoformat(),
         "hash_count": unique_count,
         "rows_processed": total_rows,
         "invalid_rows": invalid_rows,
         "shards": shard_metadata,
     }
 
-    manifest_path = (
-        output_dir / "manifest.json"
-    )
-
-    manifest_path.write_text(
-        json.dumps(
-            manifest,
-            indent=2
-        ) + "\n",
+    (output_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -690,25 +602,17 @@ def build_database(
 
 def verify_database(directory: Path) -> None:
 
-    manifest_path = (
-        directory / "manifest.json"
-    )
+    manifest_path = directory / "manifest.json"
 
     if not manifest_path.exists():
-        raise RuntimeError(
-            "Manifest is missing."
-        )
+        raise RuntimeError("Manifest is missing.")
 
     manifest = json.loads(
-        manifest_path.read_text(
-            encoding="utf-8"
-        )
+        manifest_path.read_text(encoding="utf-8")
     )
 
     if len(manifest["shards"]) != 16:
-        raise RuntimeError(
-            "Expected exactly 16 shards."
-        )
+        raise RuntimeError("Expected exactly 16 shards.")
 
     total_hashes = 0
     total_size = 0
@@ -718,13 +622,9 @@ def verify_database(directory: Path) -> None:
         path = directory / shard_name
 
         if not path.exists():
-            raise RuntimeError(
-                f"Missing shard: {shard_name}"
-            )
+            raise RuntimeError(f"Missing shard: {shard_name}")
 
-        info = manifest["shards"].get(
-            shard_name
-        )
+        info = manifest["shards"].get(shard_name)
 
         if info is None:
             raise RuntimeError(
@@ -738,9 +638,7 @@ def verify_database(directory: Path) -> None:
                 f"Incorrect file size: {shard_name}"
             )
 
-        actual_digest = hashlib.sha256(
-            content
-        ).hexdigest()
+        actual_digest = hashlib.sha256(content).hexdigest()
 
         if actual_digest != info["sha256"]:
             raise RuntimeError(
@@ -783,14 +681,8 @@ def verify_database(directory: Path) -> None:
 
     print()
     print("DATABASE VERIFIED")
-
-    print(
-        f"Total hashes: {total_hashes:,}"
-    )
-
-    print(
-        f"Total shard size: {total_size:,} bytes"
-    )
+    print(f"Total hashes: {total_hashes:,}")
+    print(f"Total shard size: {total_size:,} bytes")
 
 
 # ============================================================
@@ -805,25 +697,18 @@ def main():
         )
 
     temporary_root = Path(
-        tempfile.mkdtemp(
-            prefix="dir-import-"
-        )
+        tempfile.mkdtemp(prefix="dir-import-")
     )
 
-    archive_path = (
-        temporary_root / "full.csv.zip"
-    )
-
-    staging_dir = (
-        temporary_root / "database"
-    )
+    archive_path = temporary_root / "full.csv.zip"
+    staging_dir = temporary_root / "database"
 
     try:
 
-        # 1. Download the complete export.
+        # 1. Download archive.
         download_export(archive_path)
 
-        # 2. Extract SHA-256 hashes.
+        # 2. Extract hashes.
         (
             shards,
             unique_count,
@@ -831,7 +716,7 @@ def main():
             invalid_rows
         ) = extract_hashes(archive_path)
 
-        # 3. Build the new database.
+        # 3. Build database.
         build_database(
             shards,
             unique_count,
@@ -840,46 +725,30 @@ def main():
             staging_dir,
         )
 
-        # 4. Verify every shard and checksum.
+        # 4. Verify every shard.
         verify_database(staging_dir)
 
-        # 5. Safely replace the existing database.
-        backup_dir = (
-            temporary_root / "database-backup"
-        )
+        # 5. Safely replace existing database.
+        backup_dir = temporary_root / "database-backup"
 
         if DATABASE_DIR.exists():
             DATABASE_DIR.rename(backup_dir)
 
         try:
-
-            staging_dir.rename(
-                DATABASE_DIR
-            )
+            staging_dir.rename(DATABASE_DIR)
 
         except Exception:
 
-            if (
-                backup_dir.exists()
-                and not DATABASE_DIR.exists()
-            ):
-                backup_dir.rename(
-                    DATABASE_DIR
-                )
+            if backup_dir.exists() and not DATABASE_DIR.exists():
+                backup_dir.rename(DATABASE_DIR)
 
             raise
 
         print()
-        print(
-            "Full database import completed successfully."
-        )
+        print("Full database import completed successfully.")
 
     finally:
-
-        shutil.rmtree(
-            temporary_root,
-            ignore_errors=True
-        )
+        shutil.rmtree(temporary_root, ignore_errors=True)
 
 
 # ============================================================
@@ -889,7 +758,6 @@ def main():
 if __name__ == "__main__":
 
     try:
-
         main()
 
     except Exception as error:
