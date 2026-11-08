@@ -14,6 +14,7 @@ concurrency:
 jobs:
   import:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -27,11 +28,12 @@ jobs:
       - name: Import full MalwareBazaar database
         env:
           MB_AUTH_KEY: ${{ secrets.MB_AUTH_KEY }}
-        run: python import_full_database.py
+          PYTHONUNBUFFERED: "1"
+        run: python -u import_full_database.py
 
       - name: Verify database
         run: |
-          python - <<'PY'
+          python -u - <<'PY'
           import json
           from pathlib import Path
 
